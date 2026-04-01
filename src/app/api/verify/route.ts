@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import PDFParser from 'pdf2json';
 import ExcelJS from 'exceljs';
 
-// Reuse logic from matcher and parser but specifically for verification
+// PDF 데이터 추출 로직
 async function getPdfDetailedData(buffer: Buffer): Promise<any> {
     return new Promise((resolve, reject) => {
         const pdfParser = new (PDFParser as any)();
@@ -117,11 +117,23 @@ export async function POST(req: NextRequest) {
         const col1 = row.getCell(1).text.trim();
         if (!col1 || col1 === '총 합계') return;
         const qty = parseInt(row.getCell(qtyColIdx).value as any) || 0;
-        excelTotal += qty;
+        
         if (isMatchedFile) {
+            excelTotal += qty;
             const originalKeysStr = row.getCell(5).text.trim();
-            originalKeysStr.split(';').forEach(k => { if (k) excelDetailed[k] = { qty, isAggregated: true }; });
+            originalKeysStr.split(';').forEach(k => { 
+                if (k) {
+                    excelDetailed[k] = { 
+                        qty: qty, 
+                        isAggregated: true,
+                        // 매칭된 한글 상품명과 옵션을 저장합니다.
+                        matchedName: row.getCell(2).text.trim(),
+                        matchedOption: row.getCell(3).text.trim()
+                    }; 
+                }
+            });
         } else {
+            excelTotal += qty;
             const key = `${col1}|${row.getCell(2).text.trim()}|${row.getCell(3).text.trim()}|${row.getCell(4).text.trim()}`;
             excelDetailed[key] = (excelDetailed[key] || 0) + qty;
         }
@@ -133,7 +145,14 @@ export async function POST(req: NextRequest) {
         const pdfQty = pdfData.detailed[k];
         const exData = excelDetailed[k];
         const exQty = typeof exData === 'number' ? exData : (exData?.qty || 0);
-        comparisons.push({ label: k.split('|').join(' / '), pdf: pdfQty, excel: exQty, isMatch: pdfQty === exQty });
+        
+        // 표시용 라벨 결정: 매칭된 한글 정보가 있으면 그것을 쓰고, 없으면 기존 영문 정보를 씁니다.
+        let label = k.split('|').join(' / ');
+        if (exData && typeof exData !== 'number' && exData.matchedName) {
+            label = `${exData.matchedName} / ${exData.matchedOption}`;
+        }
+        
+        comparisons.push({ label: label, pdf: pdfQty, excel: exQty, isMatch: pdfQty === exQty });
     });
 
     return NextResponse.json({
