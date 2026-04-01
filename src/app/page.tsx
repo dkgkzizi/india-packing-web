@@ -76,17 +76,31 @@ export default function PackingListApp() {
       
       setProgress(prev => prev.map((s, i) => i === 1 ? { ...s, status: 'done' } : i === 2 ? { ...s, status: 'loading' } : s));
       
+      if (activeTab === 'verify') {
+        // Verification is JSON response, not file
+        const data = await response.json();
+        setProgress(prev => prev.map(s => ({ ...s, status: 'done' })));
+        setResult({ success: true, message: '수량 검증이 완료되었습니다.', stats: data });
+        setLoading(false);
+        return;
+      }
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = activeTab === 'convert' ? `Packing_List_${Date.now()}.xlsx` : `Matched_Result_${Date.now()}.xlsx`;
+      
+      // Filename Rule: YYYYMMDD_OriginalName
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const originalName = file.name.split('.').slice(0, -1).join('.');
+      const prefix = activeTab === 'convert' ? 'Packing' : 'Matched';
+      link.download = `${today}_${originalName}_${prefix}.xlsx`;
       
       setProgress(prev => prev.map(s => ({ ...s, status: 'done' })));
       
       setResult({ 
         success: true, 
-        message: `${activeTab === 'convert' ? 'PDF 변환' : '데이터 매칭'}이 성공적으로 완료되었습니다! 아래 버튼을 눌러 결과 파일을 확인하세요.`,
+        message: `${activeTab === 'convert' ? 'PDF 변환' : '데이터 매칭'}이 성공적으로 완료되었습니다!`,
         filePath: link.download 
       });
 
@@ -254,7 +268,7 @@ export default function PackingListApp() {
               <div className="bg-slate-800/30 p-5 rounded-xl border border-slate-700/30 flex gap-4">
                 <div className="mt-1"><ShieldCheck className="w-5 h-5 text-cyan-400" /></div>
                 <div>
-                  <h4 className="text-white font-semibold mb-1">안격 보안 보안</h4>
+                  <h4 className="text-white font-semibold mb-1">안전한 보안</h4>
                   <p className="text-slate-400 text-sm">업로드된 파일은 변환 즉시 서버에서 삭제되어 유출 걱정이 없습니다.</p>
                 </div>
               </div>
@@ -288,14 +302,17 @@ export default function PackingListApp() {
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
                       step.status === 'done' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' :
                       step.status === 'loading' ? 'border-indigo-400 text-indigo-400 animate-pulse' :
+                      step.status === 'error' ? 'border-red-500 text-red-500 bg-red-500/10' :
                       'border-slate-700 text-slate-700'
                     }`}>
                       {step.status === 'done' ? <CheckCircle2 className="w-5 h-5" /> : 
-                       step.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : idx + 1}
+                       step.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : 
+                       step.status === 'error' ? '✕' : idx + 1}
                     </div>
                     <span className={`text-sm font-medium ${
                       step.status === 'done' ? 'text-indigo-400' :
-                      step.status === 'loading' ? 'text-white' : 'text-slate-500'
+                      step.status === 'loading' ? 'text-white' : 
+                      step.status === 'error' ? 'text-red-400' : 'text-slate-500'
                     }`}>
                       {step.label}
                     </span>
@@ -304,31 +321,63 @@ export default function PackingListApp() {
               </div>
 
               {result && (
-                <div className={`mt-8 p-6 rounded-xl border animate-in fade-in slide-in-from-bottom-4 duration-500 ${
-                  result.success ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-red-500/10 border-red-500/30'
+                <div className={`mt-8 p-6 rounded-xl border animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden ${
+                  result.success ? 'bg-slate-800/60 border-indigo-500/30' : 'bg-red-500/10 border-red-500/30'
                 }`}>
                   <div className="flex items-center gap-3 mb-3">
                     {result.success ? <CheckCircle2 className="w-6 h-6 text-indigo-400" /> : <AlertCircle className="w-6 h-6 text-red-400" />}
                     <h4 className={`font-bold ${result.success ? 'text-indigo-400' : 'text-red-400'}`}>
-                      {result.success ? '작업 완료' : '작업 실패'}
+                      {result.success ? (activeTab === 'verify' ? '검증 완료' : '작업 완료') : '작업 실패'}
                     </h4>
                   </div>
                   <p className="text-sm text-slate-300 mb-4 leading-relaxed">{result.message}</p>
                   
-                  {result.success && (
-                    <button 
-                      onClick={() => {
-                        // The download link is already handled in startConversion or we can re-trigger
-                        const link = document.createElement('a');
-                        link.href = '#'; 
-                        link.innerText = '다시 다운로드 하려면 변환을 다시 실행해주세요.';
-                        alert('결과 파일이 이미 다운로드되었습니다.');
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors font-semibold"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>파일 보관됨</span>
-                    </button>
+                  {/* Detailed Verification Results */}
+                  {result.stats && activeTab === 'verify' && (
+                    <div className="space-y-4">
+                      <div className="bg-slate-900/80 rounded-lg p-4 border border-slate-700/50 max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
+                        <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">상세 분석 결과</h5>
+                        {result.stats.comparisons.map((c: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between py-2 border-b border-slate-800 last:border-none">
+                            <span className="text-[11px] text-slate-300 flex-1 pr-2 truncate" title={c.label}>
+                              {c.label} ({c.excel}개)
+                            </span>
+                            {c.isMatch ? (
+                              <span className="text-xs font-bold text-indigo-400">O</span>
+                            ) : (
+                              <span className="text-xs font-bold text-red-500">X</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className={`p-4 rounded-lg flex flex-col gap-1 border ${
+                        result.stats.pdfTotal === result.stats.excelTotal ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-red-500/10 border-red-500/20'
+                      }`}>
+                         <div className="flex justify-between items-center">
+                            <span className="text-xs text-slate-400">전체 총 수량</span>
+                            <span className={`text-sm font-bold ${result.stats.pdfTotal === result.stats.excelTotal ? 'text-indigo-400' : 'text-red-500'}`}>
+                              {result.stats.pdfTotal === result.stats.excelTotal 
+                                ? `일치 (${result.stats.pdfTotal}개)` 
+                                : `불일치 (PDF:${result.stats.pdfTotal} vs 엑셀:${result.stats.excelTotal})`
+                              }
+                            </span>
+                         </div>
+                         <div className="text-[10px] text-slate-500">
+                            {result.stats.itemsMatch ? '모든 상세 항목이 정확히 매칭되었습니다.' : '상세 항목 중 수량 차이가 발견되었습니다.'}
+                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {result.success && activeTab !== 'verify' && (
+                    <div className="mt-4 p-3 bg-indigo-500/5 rounded-lg border border-indigo-500/10 flex items-center gap-3">
+                       <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
+                       <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-slate-400 truncate">저장된 파일명</p>
+                          <p className="text-xs text-white font-medium truncate">{result.filePath}</p>
+                       </div>
+                    </div>
                   )}
                 </div>
               )}
