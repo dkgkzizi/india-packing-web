@@ -8,24 +8,21 @@ const COLOR_MAP: Record<string, string[]> = {
     'IVORY': ['아이보리', '화이트', '크림', '백아이보리'],
     'WHITE': ['화이트', '아이보리', '백아이보리'],
     'BLACK': ['블랙', '검정'],
-    'PINK': ['핑크', '분홍', '핫핑크', '연핑크'],
+    'PINK': ['핑크', '분홍'],
     'YELLOW': ['옐로우', '노랑'],
     'MELANGE': ['멜란지', '회색', '그레이'],
     'GRAY': ['그레이', '회색', '멜란지'],
-    'BEIGE': ['베이지', '오트밀'],
-    'BLUE': ['블루', '파랑', '민트'],
+    'BEIGE': ['베이지'],
+    'BLUE': ['블루', '파랑'],
     'NAVY': ['네이비', '남색'],
-    'RED': ['레드', '빨강', '와인'],
+    'RED': ['레드', '빨강'],
     'GREEN': ['그린', '초록'],
     'MINT': ['민트'],
-    'PURPLE': ['퍼플', '보라', '라벤더'],
+    'PURPLE': ['퍼플', '보라'],
     'CHARCOAL': ['차콜', '먹색'],
     'CORAL': ['코랄'],
     'PEACH': ['피치'],
-    'BROWN': ['브라운', '갈색', '코코아'],
-    'WINE': ['와인', '레드'],
-    'LAVENDER': ['라벤더', '퍼플'],
-    'KHAKI': ['카키']
+    'BROWN': ['브라운', '갈색']
 };
 
 async function fetchCSV(url: string, hops = 0): Promise<string> {
@@ -70,11 +67,7 @@ function parseCSV(text: string) {
 
 function normalizeStr(s: any) {
     if (!s) return "";
-    // 숫자 0과 대문자 O를 혼용하는 경우가 많아 O로 통일하여 비교
-    return s.toString()
-        .replace(/[^0-9A-Z]/gi, '')
-        .toUpperCase()
-        .replace(/0/g, 'O');
+    return s.toString().replace(/[^0-9A-Z]/gi, '').toUpperCase();
 }
 
 function normalizeColor(c: any) {
@@ -99,30 +92,23 @@ function getBigrams(str: string) {
     for (let i = 0; i < str.length - 1; i++) pairs.push(str.substring(i, i + 2));
     return pairs;
 }
+// ... (상단 skip)
 
 export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook> {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
-    const sheet = workbook.worksheets[0];
-    
-    const excelRecords: any[] = [];
-    sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const styleNo = row.getCell(1).text.trim();
-        const pdfName = row.getCell(2).text.trim();
-        
-        // '총 합계' 또는 스타일 번호가 없거나, 합계 성격의 행 제외
-        if (!styleNo || styleNo.includes('합계') || styleNo === 'STYLE NO' || styleNo.includes('TOTAL') || styleNo.includes('Total')) return;
-        if (pdfName.includes('합계') || pdfName.includes('TOTAL')) return;
-        
-        excelRecords.push({
-            styleNo: styleNo,
-            pdfName: row.getCell(2).text.trim(),
-            color: row.getCell(3).text.trim(),
-            size: row.getCell(4).text.trim(),
-            qty: parseInt(row.getCell(5).value as any) || 0
-        });
-    });
+const workbook = new ExcelJS.Workbook();
+@@ -102,7 +9,8 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
+sheet.eachRow((row, rowNumber) => {
+if (rowNumber === 1) return;
+const styleNo = row.getCell(1).text.trim();
+        if (!styleNo || styleNo === '총 합계') return;
+        // [수정] '합계'가 포함된 행은 매칭에서 제외하도록 보강
+        if (!styleNo || styleNo.includes('합계')) return; 
+excelRecords.push({
+styleNo: styleNo,
+pdfName: row.getCell(2).text.trim(),
+@@ -112,99 +20,45 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
+});
+});
 
     const csvText = await fetchCSV(SHEET_URL);
     const csvData = parseCSV(csvText);
@@ -145,12 +131,6 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
         if (!ex.styleNo) return;
         const exNormStyle = normalizeStr(ex.styleNo);
         let matches = sheetRecords.filter(s => s.normStyle === exNormStyle || s.styleNo === ex.styleNo);
-        
-        // 스타일 번호가 완벽히 일치하지 않을 경우 유사도 검색 (부분 일치)
-        if (matches.length === 0 && exNormStyle.length >= 4) {
-            matches = sheetRecords.filter(s => s.normStyle.includes(exNormStyle) || exNormStyle.includes(s.normStyle));
-        }
-
         if (matches.length === 0) {
             matches = sheetRecords.filter(s => s.productName.toUpperCase().includes(exNormStyle));
         }
@@ -162,62 +142,45 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
             for(let m of matches) {
                 let score = 0;
                 const opt = m.option.replace(/\s+/g, '').toUpperCase();
-                
-                // 1. 스타일 번호 완전 일치 가산점
-                if (m.styleNo.toUpperCase() === ex.styleNo.toUpperCase() || m.normStyle === exNormStyle) score += 40;
-                
-                // 2. 사이즈 일치 가산점
                 if (ex.size) {
                     const normSize = ex.size.replace(/\s+/g, '').toUpperCase();
                     if (opt.includes(`:${normSize}`) || opt === normSize) score += 20;
                     else if (opt.includes(normSize)) score += 10;
                 }
-                
-                // 3. 색상 일치 가산점
-                if (ex.color && opt.includes(ex.color.replace(/\s+/g, '').toUpperCase())) score += 15;
-                else { 
-                    for(let syn of koColors) { 
-                        if (opt.toUpperCase().includes(syn.replace(/\s+/g, ''))) { 
-                            score += 15; 
-                            break; 
-                        } 
-                    } 
-                }
-                
-                // 4. 상품명 유사도 가산점
+                if (ex.color && opt.includes(ex.color.replace(/\s+/g, '').toUpperCase())) score += 10;
+                else { for(let syn of koColors) { if (opt.toUpperCase().includes(syn.replace(/\s+/g, ''))) { score += 10; break; } } }
+                if (m.styleNo.toUpperCase() === ex.styleNo.toUpperCase()) score += 30;
                 const sim = getSimilarity(ex.pdfName, m.productName);
-                if (sim >= 0.6) score += (sim * 20);
-                
+                if (sim >= 0.7) score += (sim * 15);
                 if (score > bestScore) { bestScore = score; bestMatch = m; }
             }
         }
         
         const originalKey = `${ex.styleNo}|${ex.pdfName}|${ex.color}|${ex.size}`;
         
-        if (bestMatch && bestScore >= 35) {
+        if (bestMatch && bestScore >= 25) {
             matchedRaw.push({
                 productCode: bestMatch.productCode,
                 sheetName: bestMatch.productName,
-                color: ex.color,
-                size: ex.size,
+                sheetOption: bestMatch.option,
                 qty: ex.qty,
                 originalKey: originalKey
             });
         } else {
             matchedRaw.push({
-                productCode: '미매칭',
-                sheetName: ex.pdfName,
-                color: ex.color,
-                size: ex.size,
+                productCode: '실패',
+                sheetName: `(미매칭) ${ex.pdfName}`,
+                sheetOption: `${ex.color}, ${ex.size}`,
                 qty: ex.qty,
                 originalKey: originalKey
             });
         }
     });
+    // ... (매칭 로직은 그대로 유지)
 
     const aggregated: Record<string, any> = {};
     matchedRaw.forEach(item => {
-        const key = `${item.productCode}|${item.sheetName}|${item.color}|${item.size}`;
+        const key = `${item.productCode}|${item.sheetName}|${item.sheetOption}`;
         if (aggregated[key]) {
             aggregated[key].qty += item.qty;
             if (!aggregated[key].originalKeys) aggregated[key].originalKeys = [];
@@ -226,70 +189,69 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
             aggregated[key] = { ...item, originalKeys: [item.originalKey] };
         }
     });
+    // [수정] 텍스트를 '미매칭'으로 통일 (스크린샷 기준)
+    if (bestMatch && bestScore >= 25) {
+        matchedRaw.push({
+            productCode: bestMatch.productCode,
+            sheetName: bestMatch.productName,
+            sheetOption: bestMatch.option,
+            qty: ex.qty,
+            originalKey: originalKey
+        });
+    } else {
+        matchedRaw.push({
+            productCode: '미매칭', 
+            sheetName: `(미매칭) ${ex.pdfName}`,
+            sheetOption: `${ex.color} / ${ex.size}`,
+            qty: ex.qty,
+            originalKey: originalKey
+        });
+    }
 
     const finalResults = Object.values(aggregated).sort((a,b) => {
-        if (a.productCode === '미매칭' && b.productCode !== '미매칭') return 1;
-        if (a.productCode !== '미매칭' && b.productCode === '미매칭') return -1;
+        if (a.productCode === '실패' && b.productCode !== '실패') return 1;
+        if (a.productCode !== '실패' && b.productCode === '실패') return -1;
         return a.sheetName.localeCompare(b.sheetName);
     });
+    // ... (중간 aggregation 로직 그대로 유지)
 
-    const outWb = new ExcelJS.Workbook();
-    const outWs = outWb.addWorksheet('매칭결과');
-    
-    // 오늘 날짜 메모용 (YYMMDD 형식)
+const outWb = new ExcelJS.Workbook();
+const outWs = outWb.addWorksheet('매칭결과');
+
+    // [추가] 오늘 날짜 메모 (예: 260401_인도 입고)
     const today = new Date();
     const memoDate = today.toISOString().slice(2, 10).replace(/-/g, '');
     const memoContent = `${memoDate}_인도 입고`;
 
-    outWs.columns = [
-        { header: '상품코드', key: 'productCode', width: 20 },
-        { header: '상품명', key: 'sheetName', width: 40 },
-        { header: '색상', key: 'color', width: 15 },
-        { header: '사이즈', key: 'size', width: 12 },
-        { header: '작업수량', key: 'qty', width: 15 },
-        { header: '메모', key: 'memo', width: 25 },
-        { header: '숨김식별키', key: 'originalKeys', width: 35 }
-    ];
+    // [수정] 컬럼 설정: E열 이름을 Original_Keys로 변경하고 F열(메모) 추가
+outWs.columns = [
+{ header: '상품코드', key: 'productCode', width: 20 },
+{ header: '상품명', key: 'sheetName', width: 40 },
+{ header: '옵션', key: 'sheetOption', width: 30 },
+{ header: '작업수량', key: 'qty', width: 15 },
+        { header: '숨김식별키', key: 'originalKeys', width: 0 } 
+        { header: 'Original_Keys', key: 'originalKeys', width: 35 }, // 숨김식별키 -> Original_Keys
+        { header: '메모', key: 'memo', width: 25 }                  // 메모 컬럼 추가
+];
 
-    // 헤더 디자인 복구 (파란 배경, 흰 글씨)
-    const headerRow = outWs.getRow(1);
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
-    headerRow.alignment = { horizontal: 'center' as any, vertical: 'middle' as any };
-    
-    let totalQty = 0;
-    finalResults.forEach(r => {
-        const row = outWs.addRow({
-            productCode: r.productCode,
-            sheetName: r.sheetName,
-            color: r.color,
-            size: r.size,
-            qty: r.qty,
-            memo: memoContent,
-            originalKeys: r.originalKeys.join(';')
-        });
-        totalQty += r.qty;
+outWs.getRow(1).font = { bold: true };
+@@ -216,14 +70,16 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
+sheetName: r.sheetName,
+sheetOption: r.sheetOption,
+qty: r.qty,
+            originalKeys: r.originalKeys.join(';') 
+            originalKeys: r.originalKeys.join(';'),
+            memo: memoContent // [추가] 메모 데이터 입력
+});
+        if (r.productCode === '실패') {
         if (r.productCode === '미매칭') {
-            row.eachCell(c => { c.font = { color: { argb: 'FFFF0000' } }; });
-        }
-    });
-
-    // 하단 총 합계 행 추가
-    const totalRow = outWs.addRow({
-        productCode: '합계',
-        sheetName: '총 합계',
-        qty: totalQty,
-        memo: memoContent
-    });
-    totalRow.font = { bold: true };
-    totalRow.getCell('qty').font = { color: { argb: 'FFFF0000' }, bold: true };
-
-    outWs.eachRow(row => {
-        row.eachCell(cell => {
-            cell.border = { top: {style:'thin' as any}, left: {style:'thin' as any}, bottom: {style:'thin' as any}, right: {style:'thin' as any} };
-            cell.alignment = { horizontal: 'center' as any, vertical: 'middle' as any };
-        });
-    });
-
-    return outWb;
+row.eachCell(c => { c.font = { color: { argb: 'FFFF0000' } }; });
 }
+});
+
+    outWs.getColumn(5).hidden = true;
+    // [수정] 5번째 컬럼 숨기기 로직 삭제 (표시되도록)
+    // outWs.getColumn(5).hidden = true; 
+
+outWs.eachRow(row => {
+row.eachCell(cell => {
