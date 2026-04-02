@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
         
         if (isMatchedFile) {
             excelTotal += qty;
-            const originalKeysStr = row.getCell(5).text.trim();
+            const originalKeysStr = row.getCell(7).text.trim();
             originalKeysStr.split(';').forEach(k => { 
                 if (k) {
                     excelDetailed[k] = { 
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
                         isAggregated: true,
                         // 매칭된 한글 상품명과 옵션을 저장합니다.
                         matchedName: row.getCell(2).text.trim(),
-                        matchedOption: row.getCell(3).text.trim()
+                        matchedOption: `${row.getCell(3).text.trim()} / ${row.getCell(4).text.trim()}`
                     }; 
                 }
             });
