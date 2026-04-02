@@ -248,12 +248,16 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
         { header: '사이즈', key: 'size', width: 12 },
         { header: '작업수량', key: 'qty', width: 15 },
         { header: '메모', key: 'memo', width: 25 },
-        { header: '숨김식별키', key: 'originalKeys', width: 0 } // G열에 숨김 처리
+        { header: '숨김식별키', key: 'originalKeys', width: 35 }
     ];
 
-    outWs.getRow(1).font = { bold: true };
-    outWs.getRow(1).alignment = { horizontal: 'center' };
+    // 헤더 디자인 복구 (파란 배경, 흰 글씨)
+    const headerRow = outWs.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+    headerRow.alignment = { horizontal: 'center' as any, vertical: 'middle' as any };
     
+    let totalQty = 0;
     finalResults.forEach(r => {
         const row = outWs.addRow({
             productCode: r.productCode,
@@ -264,13 +268,21 @@ export async function matchExcelBuffer(buffer: Buffer): Promise<ExcelJS.Workbook
             memo: memoContent,
             originalKeys: r.originalKeys.join(';')
         });
+        totalQty += r.qty;
         if (r.productCode === '미매칭') {
             row.eachCell(c => { c.font = { color: { argb: 'FFFF0000' } }; });
         }
     });
 
-    // 식별키 컬럼을 숨기지 않고 노출함
-    // outWs.getColumn(5).hidden = true;
+    // 하단 총 합계 행 추가
+    const totalRow = outWs.addRow({
+        productCode: '합계',
+        sheetName: '총 합계',
+        qty: totalQty,
+        memo: memoContent
+    });
+    totalRow.font = { bold: true };
+    totalRow.getCell('qty').font = { color: { argb: 'FFFF0000' }, bold: true };
 
     outWs.eachRow(row => {
         row.eachCell(cell => {

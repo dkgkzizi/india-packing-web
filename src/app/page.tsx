@@ -24,16 +24,18 @@ interface ProgressStep {
 
 export default function PackingListApp() {
   const [activeTab, setActiveTab] = useState<'convert' | 'match' | 'verify'>('convert');
-  const [file, setFile] = useState<File | null>(null);
-  const [secondFile, setSecondFile] = useState<File | null>(null); // For verification
-  const [progress, setProgress] = useState<ProgressStep[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; filePath?: string; message?: string; stats?: any } | null>(null);
+  const [originalPdfFile, setOriginalPdfFile] = useState<File | null>(null); // 원본 PDF 보관용
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, num: 1 | 2 = 1) => {
     if (e.target.files && e.target.files[0]) {
-      if (num === 1) setFile(e.target.files[0]);
-      else setSecondFile(e.target.files[0]);
+      const selected = e.target.files[0];
+      if (num === 1) {
+        setFile(selected);
+        // PDF 변환 탭에서 파일을 올릴 때만 원본 PDF로 저장
+        if (activeTab === 'convert') setOriginalPdfFile(selected);
+      } else {
+        setSecondFile(selected);
+      }
     }
   };
 
@@ -77,7 +79,6 @@ export default function PackingListApp() {
       setProgress(prev => prev.map((s, i) => i === 1 ? { ...s, status: 'done' } : i === 2 ? { ...s, status: 'loading' } : s));
       
       if (activeTab === 'verify') {
-        // Verification is JSON response, not file
         const data = await response.json();
         setProgress(prev => prev.map(s => ({ ...s, status: 'done' })));
         setResult({ success: true, message: '수량 검증이 완료되었습니다.', stats: data });
@@ -90,23 +91,45 @@ export default function PackingListApp() {
       const link = document.createElement('a');
       link.href = url;
       
-      // Filename Rule: YYYYMMDD_OriginalName
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const originalName = file.name.split('.').slice(0, -1).join('.');
       const prefix = activeTab === 'convert' ? 'Packing' : 'Matched';
-      link.download = `${today}_${originalName}_${prefix}.xlsx`;
+      const fileName = `${today}_${originalName}_${prefix}.xlsx`;
+      link.download = fileName;
       
       setProgress(prev => prev.map(s => ({ ...s, status: 'done' })));
       
       setResult({ 
         success: true, 
         message: `${activeTab === 'convert' ? 'PDF 변환' : '데이터 매칭'}이 성공적으로 완료되었습니다!`,
-        filePath: link.download 
+        filePath: fileName 
       });
 
       // Automatically trigger download
       link.click();
       window.URL.revokeObjectURL(url);
+
+      // --- 자동화 파이프라인 강화 ---
+      const resultFile = new File([blob], fileName, { type: blob.type });
+
+      if (activeTab === 'convert') {
+        // PDF 변환 후 -> 매칭 탭으로 자동 이동 및 파일 등록
+        setTimeout(() => {
+          setFile(resultFile);
+          setActiveTab('match');
+          setResult(null);
+          setProgress([]);
+        }, 1500);
+      } else if (activeTab === 'match') {
+        // 매칭 완료 후 -> 검증 탭으로 자동 이동 및 (PDF + 매칭엑셀) 등록
+        setTimeout(() => {
+          setActiveTab('verify');
+          setFile(originalPdfFile);   // 원래 올렸던 PDF
+          setSecondFile(resultFile); // 방금 매칭된 엑셀
+          setResult(null);
+          setProgress([]);
+        }, 1500);
+      }
 
     } catch (err: any) {
       setProgress(prev => prev.map(s => s.status === 'loading' ? { ...s, status: 'error' } : s));
